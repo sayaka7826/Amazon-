@@ -258,6 +258,8 @@ period_option = st.sidebar.radio(
     ["直近30日", "直近60日", "直近90日", "カスタム"],
 )
 
+DATA_LAG_DAYS = 3  # Amazonのデータ反映ラグ
+
 if period_option == "カスタム":
     start_date = st.sidebar.date_input("開始日")
     end_date = st.sidebar.date_input("終了日")
@@ -267,7 +269,15 @@ else:
     end_date = datetime.now().date()
     start_date = end_date - timedelta(days=days)
 
-st.sidebar.info(f"分析期間: {start_date} ～ {end_date}")
+# 有効分析期間（直近3日を除外）
+effective_end = end_date - timedelta(days=DATA_LAG_DAYS)
+effective_start = start_date
+
+st.sidebar.info(
+    f"📊 分析対象期間\n\n"
+    f"{effective_start} ～ {effective_end}\n\n"
+    f"※ Amazon のデータ反映に最大3日かかるため、直近3日間を除外しています"
+)
 
 # =====================
 # データ管理
@@ -426,6 +436,8 @@ page = st.sidebar.radio(
     "📌 ページ選択",
     [
         "ダッシュボード",
+        "📋 週次アクションサマリー",
+        "🔍 推奨キーワード",
         "1️⃣ 診断機能 - 今の設定、大丈夫？",
         "2️⃣ キーワード昇格・除外アドバイザー",
         "3️⃣ 入札シミュレーター",
@@ -443,7 +455,212 @@ analyzers = initialize_analyzers()
 # ページコンテンツ
 # =====================
 
-if page == "ダッシュボード":
+# =====================
+# 週次アクションサマリー
+# =====================
+if page == "📋 週次アクションサマリー":
+    st.header("📋 週次アクションサマリー")
+    st.caption(f"分析対象: {effective_start} ～ {effective_end}（直近3日除外済み）")
+
+    campaigns = st.session_state.uploaded_campaigns
+    keywords  = st.session_state.uploaded_keywords
+
+    if not campaigns:
+        st.info("👈 サイドバーからキャンペーンCSVをアップロードしてください")
+        st.stop()
+
+    diagnostics   = analyzers["diagnostics"]
+    diag_result   = diagnostics.diagnose_all_campaigns(campaigns)
+    advisor       = analyzers["keyword_advisor"]
+    kw_analysis   = advisor.analyze_keyword_portfolio(keywords) if keywords else {}
+
+    urgent, weekly, monthly = [], [], []
+
+    # 診断結果から緊急・通常アクション抽出
+    for d in diag_result["diagnoses"]:
+        score = d["overall_score"]
+        name  = d["campaign_name"]
+        m     = d["metrics"]
+        if score < 50:
+            issues = []
+            if d["scores"]["roas"]["evaluation"] in {"要改善","改善中"}:
+                issues.append(f"ROAS {m['roas']:.1f}")
+            if d["scores"]["cpc"]["evaluation"] in {"要改善","改善中"}:
+                issues.append(f"CPC {m['cpc']:.0f}円")
+            if d["scores"]["conversion_rate"]["evaluation"] in {"要改善","改善中"}:
+                issues.append(f"成約率 {m['conversion_rate']:.1f}%")
+            urgent.append(
+                f"🔴 **{name}** のスコアが {score}/100 — 問題指標: {' / '.join(issues) or '複合'}\n"
+                f"   → キャンペーン全体の入札単価を下げるか、除外KWを追加してください"
+            )
+        elif score < 70:
+            weekly.append(
+                f"🟡 **{name}** のスコアが {score}/100 — 診断ページで詳細を確認してください"
+            )
+
+    # KW除外候補
+    if kw_analysis.get("opportunities"):
+        excl_count = kw_analysis["opportunities"].get("exclusion_candidates", 0)
+        excl_waste = kw_analysis["opportunities"].get("exclusion_cost_waste", 0)
+        excl_kws   = kw_analysis.get("classified_keywords", {}).get("exclusion", [])
+        if excl_count > 0:
+            top = "・".join(k["keyword"] for k in excl_kws[:3])
+            weekly.append(
+                f"🚫 除外候補KW **{excl_count}件** を処理してください\n"
+                f"   対象: {top}{'など' if excl_count>3 else ''}\n"
+                f"   → 削減可能な無駄な広告費 **{format_currency(excl_waste)}/月**"
+            )
+
+    # KW昇格候補
+    if kw_analysis.get("opportunities"):
+        promo_count = kw_analysis["opportunities"].get("promotion_candidates", 0)
+        promo_sales = kw_analysis["opportunities"].get("promotion_sales", 0)
+        promo_kws   = kw_analysis.get("classified_keywords", {}).get("promotion", [])
+        if promo_count > 0:
+            top = "・".join(k["keyword"] for k in promo_kws[:3])
+            monthly.append(
+                f"🚀 昇格候補KW **{promo_count}件** をマニュアル広告に追加してください\n"
+                f"   対象: {top}{'など' if promo_count>3 else ''}\n"
+                f"   → 各KWのCPC × 1.2〜1.5倍で入札設定（合計売上 {format_currency(promo_sales)}）"
+            )
+
+    # 入札最適化
+    avg_score = diag_result["summary"]["average_score"]
+    if avg_score < 80:
+        monthly.append(
+            f"📈 入札シミュレーターで各KWの適正CPC上限を確認し、KW単位で入札単価を調整してください\n"
+            f"   （現在の平均スコア: {avg_score}/100）"
+        )
+
+    # 表示
+    st.subheader("🔴 今すぐ対応が必要（緊急）")
+    if urgent:
+        for item in urgent:
+            st.markdown(f"- {item}")
+    else:
+        st.success("緊急対応は不要です")
+
+    st.subheader("🟡 今週中に対応すること")
+    if weekly:
+        for item in weekly:
+            st.markdown(f"- {item}")
+    else:
+        st.success("今週の対応事項はありません")
+
+    st.subheader("🟢 今月の最適化ポイント")
+    if monthly:
+        for item in monthly:
+            st.markdown(f"- {item}")
+    else:
+        st.success("追加の最適化ポイントはありません")
+
+    st.markdown("---")
+    st.caption(
+        "💡 週1回の見直しタイミング: データ取得日から3日後以降のデータを使用してください。\n"
+        f"今週の推奨データ期間: **{effective_start} ～ {effective_end}**"
+    )
+
+
+# =====================
+# 推奨キーワード
+# =====================
+elif page == "🔍 推奨キーワード":
+    st.header("🔍 推奨キーワード")
+    st.caption(f"分析対象: {effective_start} ～ {effective_end}（直近3日除外済み）")
+
+    keywords  = st.session_state.uploaded_keywords
+    campaigns = st.session_state.uploaded_campaigns
+
+    # ---- 昇格推奨 ----
+    st.subheader("🚀 昇格推奨（オート広告で成果が出たキーワード）")
+    st.markdown("検索用語レポートのオート広告キャンペーンから、1件以上購入が発生したキーワードを抽出しています。")
+
+    auto_types = {"auto", "close-match", "loose-match", "substitutes", "complements", ""}
+
+    if not keywords:
+        st.info("👈 サイドバーからキーワードCSVをアップロードしてください")
+    else:
+        promotion_kws = [
+            k for k in keywords
+            if str(k.get("matchType", "")).lower() in auto_types
+            and int(k.get("conversions", 0)) >= 1
+        ]
+        promotion_kws.sort(key=lambda x: x.get("conversions", 0), reverse=True)
+
+        if promotion_kws:
+            rows = []
+            for k in promotion_kws:
+                clicks = k.get("clicks", 0)
+                cost   = k.get("cost", 0)
+                cpc    = cost / clicks if clicks > 0 else 0
+                rec_bid = round(cpc * 1.3, 0)  # 現在CPC×1.3を推奨入札額とする
+                rows.append({
+                    "キーワード":       k.get("keyword", ""),
+                    "成約数":          int(k.get("conversions", 0)),
+                    "売上(円)":        f"{k.get('sales', 0):,.0f}",
+                    "現在CPC(円)":     f"{cpc:,.0f}",
+                    "推奨マッチタイプ": "完全一致",
+                    "推奨入札額(円)":   f"{rec_bid:,.0f}",
+                    "理由":            "オート広告で購入実績あり → マニュアルに昇格して確実に表示",
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.caption(f"合計 {len(promotion_kws)} 件。推奨入札額 = 現在の平均CPC × 1.3（完全一致で上位表示を確保するため）")
+        else:
+            st.info("成約実績のあるオートキーワードが見つかりませんでした（キーワードデータのアップロードを確認してください）")
+
+    st.markdown("---")
+
+    # ---- 新規提案 ----
+    st.subheader("💡 新規提案（関連キーワード候補）")
+    st.markdown("Amazon Ads API の keyword recommendations を元にした提案です。")
+
+    active_products = st.session_state.custom_products if st.session_state.custom_products else PRODUCTS
+
+    if not active_products:
+        st.info("👈 サイドバーの「商品設定」から商品を登録してください")
+    else:
+        # API未接続時はデモ提案を表示（接続後は実APIに切り替え）
+        st.info("⚠️ Amazon Ads API 未接続のため、登録商品をもとにしたサンプル提案を表示しています")
+
+        # 昇格済みKWから現在のCPC水準を推定
+        avg_cpc = 0
+        if keywords:
+            all_cpc = [
+                k.get("cost", 0) / k.get("clicks", 1)
+                for k in keywords if k.get("clicks", 0) > 0
+            ]
+            avg_cpc = sum(all_cpc) / len(all_cpc) if all_cpc else 0
+
+        demo_suggestions = [
+            ("プレミアム", "完全一致", round(avg_cpc * 1.2, 0) or 80),
+            ("高級 ギフト", "フレーズ一致", round(avg_cpc * 1.1, 0) or 60),
+            ("贈り物 高級", "フレーズ一致", round(avg_cpc * 1.0, 0) or 55),
+            ("限定品", "完全一致", round(avg_cpc * 1.3, 0) or 90),
+            ("お歳暮", "フレーズ一致", round(avg_cpc * 0.9, 0) or 50),
+        ]
+
+        for sku, product in list(active_products.items())[:1]:
+            st.markdown(f"**商品: {product['name']}**")
+            rows = []
+            for kw, match, bid in demo_suggestions:
+                rows.append({
+                    "提案キーワード":   kw,
+                    "推奨マッチタイプ": match,
+                    "推奨入札額(円)":   f"{bid:,.0f}",
+                    "理由":            "Amazon Ads APIの関連性スコアに基づく提案",
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+        st.caption(
+            "Amazon Ads APIに接続すると、実際の商品ASINに基づいた精度の高い推奨キーワードが取得できます。"
+            "サイドバーのAPI設定から接続してください。"
+        )
+
+
+# =====================
+# ダッシュボード
+# =====================
+elif page == "ダッシュボード":
     st.header("📈 ダッシュボード")
 
     # データ取得
