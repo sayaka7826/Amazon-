@@ -979,10 +979,16 @@ elif page == "3️⃣ 入札シミュレーター":
         st.markdown("#### 📈 CPCシナリオ別シミュレーション")
 
         scenarios = result["scenarios"]
+        if not scenarios:
+            st.warning("シナリオを生成できませんでした。成約率を上げるか、商品設定の利益額を確認してください。")
+            st.stop()
         scenarios_df = pd.DataFrame(scenarios)
-        scenarios_df_display = scenarios_df[
-            ["cpc", "total_cost", "conversions", "total_profit_from_sales", "net_profit", "roas", "performance_level"]
-        ].copy()
+        expected_cols = ["cpc", "total_cost", "conversions", "total_profit_from_sales", "net_profit", "roas", "performance_level"]
+        missing = [c for c in expected_cols if c not in scenarios_df.columns]
+        if missing:
+            st.error(f"データ構造エラー: {missing} が見つかりません。列: {list(scenarios_df.columns)}")
+            st.stop()
+        scenarios_df_display = scenarios_df[expected_cols].copy()
         scenarios_df_display.columns = [
             "CPC(円)",
             "月間広告費(円)",
