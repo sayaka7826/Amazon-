@@ -1017,42 +1017,25 @@ elif page == "3️⃣ 入札シミュレーター":
             fig_profit.add_hline(y=0, line_dash="dash", line_color="red")
             st.plotly_chart(fig_profit, use_container_width=True)
 
-        # 理想シナリオ詳細
-        with st.expander("📊 理想シナリオ詳細（ROAS 2.0倍）"):
-            ideal_scenario = result["ideal_profit_scenario"]
-            scenario_items = [
-                ("推奨CPC", f"{key_metrics['ideal_cpc']:.0f}円/クリック"),
-                ("月間クリック数（仮定）", f"{monthly_clicks:,}"),
-                ("月間広告費", format_currency(ideal_scenario["total_cost"])),
-                ("推定成約数", f"{ideal_scenario['conversions']}本"),
-                ("推定売上利益", format_currency(ideal_scenario["total_profit_from_sales"])),
-                ("純利益（広告費控除後）", format_currency(ideal_scenario["net_profit"])),
-                ("ROAS", f"{ideal_scenario['roas']:.2f}倍"),
-            ]
-
-            for label, value in scenario_items:
-                st.write(f"**{label}**: {value}")
-
-        # 複数商品の比較
-        st.markdown("---")
-        st.markdown("#### 🏆 全商品の入札戦略比較")
-
-        comparison = simulator.compare_products(monthly_clicks, estimated_cr)
-        comparison_df = pd.DataFrame(comparison["product_comparisons"])
-        comparison_display = comparison_df[
-            ["rank", "sku", "name", "profit_per_unit", "ideal_cpc", "ideal_monthly_profit", "ideal_roas"]
-        ].copy()
-        comparison_display.columns = [
-            "ランク",
-            "SKU",
-            "商品名",
-            "利益/本",
-            "理想的なCPC",
-            "月間利益",
-            "ROAS",
-        ]
-
-        st.dataframe(comparison_display, use_container_width=True)
+        # 複数商品の比較（ACoSベース）
+        if len(active_products) > 1:
+            st.markdown("---")
+            st.markdown("#### 🏆 全商品の入札戦略比較（ACoS 12%基準）")
+            rows = []
+            for sku, p in active_products.items():
+                cpc_std = simulator.calculate_cpc_from_acos(p["price"], estimated_cr, 12)
+                ad_spend = cpc_std * monthly_clicks
+                cr = estimated_cr / 100
+                conversions = int(monthly_clicks * cr)
+                net = conversions * p["profit_per_unit"] - ad_spend
+                rows.append({
+                    "SKU": sku, "商品名": p["name"],
+                    "販売価格(円)": f"{p['price']:,}",
+                    "推奨CPC(円)": f"{cpc_std:,.0f}",
+                    "月間広告費(円)": f"{ad_spend:,.0f}",
+                    "推定純利益(円)": f"{net:,.0f}",
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
     else:
         st.error(result["error"])
