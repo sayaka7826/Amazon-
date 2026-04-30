@@ -168,10 +168,13 @@ def initialize_analyzers():
 def get_sheets_handler():
     try:
         creds = dict(st.secrets["gcp_service_account"])
+        # Streamlit SecretsのTOML経由で\nがエスケープされるため修正
+        if "private_key" in creds:
+            creds["private_key"] = creds["private_key"].replace("\\n", "\n")
         spreadsheet_id = st.secrets["SPREADSHEET_ID"]
         return SheetsHandler(spreadsheet_id, creds)
     except Exception as e:
-        return str(e)  # エラー文字列を返してNoneと区別する
+        return str(e)
 
 # =====================
 # セッション状態の初期化
