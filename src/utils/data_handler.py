@@ -50,6 +50,7 @@ class DataHandler:
             "購入数",
             "Conversions",
             "コンバージョン数",
+            "商品購入数（プロモーション）",
         ],
         "sales": [
             "sales",
@@ -62,6 +63,13 @@ class DataHandler:
             "キーワード",
             "検索語句",
             "Keyword",
+            "ターゲット値",
+        ],
+        "matchType": [
+            "matchType",
+            "マッチタイプ",
+            "Match Type",
+            "ターゲットマッチタイプ",
         ],
     }
 
