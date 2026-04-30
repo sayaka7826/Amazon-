@@ -34,6 +34,7 @@ from src.utils import (
     generate_action_todos,
 )
 from src.utils.data_handler import DataHandler
+from src.utils.sheets_handler import SheetsHandler
 
 # =====================
 # ページ設定
@@ -95,6 +96,18 @@ def initialize_analyzers():
 
 
 # =====================
+# Google Sheets 初期化
+# =====================
+@st.cache_resource
+def get_sheets_handler():
+    try:
+        creds = dict(st.secrets["gcp_service_account"])
+        spreadsheet_id = st.secrets["SPREADSHEET_ID"]
+        return SheetsHandler(spreadsheet_id, creds)
+    except Exception:
+        return None
+
+# =====================
 # セッション状態の初期化
 # =====================
 if "uploaded_campaigns" not in st.session_state:
@@ -103,8 +116,23 @@ if "uploaded_campaigns" not in st.session_state:
 if "uploaded_keywords" not in st.session_state:
     st.session_state.uploaded_keywords = None
 
-if "use_uploaded_data" not in st.session_state:
-    st.session_state.use_uploaded_data = False
+if "sheets_loaded" not in st.session_state:
+    st.session_state.sheets_loaded = False
+
+# 初回のみ Google Sheets からデータを復元
+if not st.session_state.sheets_loaded:
+    _sheets = get_sheets_handler()
+    if _sheets:
+        try:
+            _campaigns = _sheets.load_campaigns()
+            _keywords = _sheets.load_keywords()
+            if _campaigns:
+                st.session_state.uploaded_campaigns = _campaigns
+            if _keywords:
+                st.session_state.uploaded_keywords = _keywords
+        except Exception:
+            pass
+    st.session_state.sheets_loaded = True
 
 
 # =====================
@@ -194,9 +222,11 @@ with st.sidebar.expander("📤 データ管理 - CSVアップロード", expande
                 campaigns_data = DataHandler.read_csv_campaigns(campaigns_file)
                 if DataHandler.validate_campaign_data(campaigns_data):
                     st.session_state.uploaded_campaigns = campaigns_data
-                    st.success(
-                        f"✅ {len(campaigns_data)}個のキャンペーンを読み込みました"
-                    )
+                    _sheets = get_sheets_handler()
+                    if _sheets:
+                        _sheets.save_campaigns(campaigns_data)
+                    st.success(f"✅ {len(campaigns_data)}個のキャンペーンを保存しました")
+                    st.rerun()
                 else:
                     st.error("❌ データが不正です")
             except Exception as e:
@@ -227,33 +257,31 @@ with st.sidebar.expander("📤 データ管理 - CSVアップロード", expande
                 keywords_data = DataHandler.read_csv_keywords(keywords_file)
                 if DataHandler.validate_keyword_data(keywords_data):
                     st.session_state.uploaded_keywords = keywords_data
-                    st.success(f"✅ {len(keywords_data)}個のキーワードを読み込みました")
+                    _sheets = get_sheets_handler()
+                    if _sheets:
+                        _sheets.save_keywords(keywords_data)
+                    st.success(f"✅ {len(keywords_data)}個のキーワードを保存しました")
+                    st.rerun()
                 else:
                     st.error("❌ データが不正です")
             except Exception as e:
                 st.error(f"❌ エラー: {str(e)}")
 
     # アップロード状態表示
+    st.markdown("---")
+    if st.session_state.uploaded_campaigns:
+        st.write(f"✅ キャンペーン: {len(st.session_state.uploaded_campaigns)}件")
+    if st.session_state.uploaded_keywords:
+        st.write(f"✅ キーワード: {len(st.session_state.uploaded_keywords)}件")
+
     if st.session_state.uploaded_campaigns or st.session_state.uploaded_keywords:
-        st.markdown("---")
-        st.subheader("📊 アップロード状態")
-
-        if st.session_state.uploaded_campaigns:
-            st.write(
-                f"✅ キャンペーン: {len(st.session_state.uploaded_campaigns)}個読み込み済み"
-            )
-
-        if st.session_state.uploaded_keywords:
-            st.write(f"✅ キーワード: {len(st.session_state.uploaded_keywords)}個読み込み済み")
-
-        if st.button("📊 アップロードしたデータを使う"):
-            st.session_state.use_uploaded_data = True
-            st.rerun()
-
-        if st.button("🔄 デモデータに戻す"):
-            st.session_state.use_uploaded_data = False
+        if st.button("🗑️ データをリセット"):
             st.session_state.uploaded_campaigns = None
             st.session_state.uploaded_keywords = None
+            _sheets = get_sheets_handler()
+            if _sheets:
+                _sheets.save_campaigns([])
+                _sheets.save_keywords([])
             st.rerun()
 
 # =====================
@@ -284,24 +312,16 @@ analyzers = initialize_analyzers()
 if page == "ダッシュボード":
     st.header("📈 ダッシュボード")
 
-    # データ取得（アップロードしたデータまたはAPIデータ）
-    if st.session_state.use_uploaded_data and st.session_state.uploaded_campaigns:
-        # アップロードしたデータを使用
-        campaign_performance = st.session_state.uploaded_campaigns
-        campaigns = [
-            {"campaignId": c["campaignId"], "name": c.get("campaignName", "")}
-            for c in campaign_performance
-        ]
-        st.info(
-            "📤 アップロードしたキャンペーンデータを使用中です | "
-            f"データ数: {len(campaign_performance)}"
-        )
-    else:
-        # デモまたはAPI データを使用
-        campaigns = api.get_campaigns()
-        campaign_performance = api.get_campaign_performance(
-            start_date.strftime("%Y%m%d"), end_date.strftime("%Y%m%d")
-        )
+    # データ取得
+    campaign_performance = st.session_state.uploaded_campaigns
+    if not campaign_performance:
+        st.info("👈 サイドバーの「データ管理」からCSVをアップロードしてください")
+        st.stop()
+    campaigns = [
+        {"campaignId": c["campaignId"], "name": c.get("campaignName", "")}
+        for c in campaign_performance
+    ]
+    st.caption(f"📤 {len(campaign_performance)}件のキャンペーンデータを表示中")
 
     if campaign_performance:
         # 概要メトリクス
@@ -452,9 +472,10 @@ elif page == "1️⃣ 診断機能 - 今の設定、大丈夫？":
     )
 
     # キャンペーン診断
-    campaign_performance = api.get_campaign_performance(
-        start_date.strftime("%Y%m%d"), end_date.strftime("%Y%m%d")
-    )
+    campaign_performance = st.session_state.uploaded_campaigns
+    if not campaign_performance:
+        st.info("👈 サイドバーの「データ管理」からCSVをアップロードしてください")
+        st.stop()
 
     if campaign_performance:
         diagnostics = analyzers["diagnostics"]
@@ -556,15 +577,14 @@ elif page == "2️⃣ キーワード昇格・除外アドバイザー":
     )
 
     # キャンペーン選択
-    if st.session_state.use_uploaded_data and st.session_state.uploaded_campaigns:
-        # アップロードしたキャンペーンから選択
-        campaigns = [
-            {"campaignId": c["campaignId"], "name": c.get("campaignName", "")}
-            for c in st.session_state.uploaded_campaigns
-        ]
-    else:
-        campaigns = api.get_campaigns()
+    if not st.session_state.uploaded_campaigns:
+        st.info("👈 サイドバーの「データ管理」からCSVをアップロードしてください")
+        st.stop()
 
+    campaigns = [
+        {"campaignId": c["campaignId"], "name": c.get("campaignName", "")}
+        for c in st.session_state.uploaded_campaigns
+    ]
     campaign_names = [c["name"] for c in campaigns]
     selected_campaign_idx = st.selectbox(
         "📌 キャンペーンを選択", range(len(campaign_names)), format_func=lambda i: campaign_names[i]
@@ -572,16 +592,14 @@ elif page == "2️⃣ キーワード昇格・除外アドバイザー":
     selected_campaign = campaigns[selected_campaign_idx]
 
     # キーワード取得
-    if st.session_state.use_uploaded_data and st.session_state.uploaded_keywords:
-        # アップロードしたキーワードからフィルタリング
+    if st.session_state.uploaded_keywords:
         keywords = [
             k for k in st.session_state.uploaded_keywords
-            if k.get("campaignId") == selected_campaign["campaignId"]
+            if str(k.get("campaignId")) == str(selected_campaign["campaignId"])
         ]
-        if keywords:
-            st.info(f"📤 キャンペーン内の {len(keywords)} 個のキーワードを表示しています")
+        st.caption(f"📤 このキャンペーンのキーワード: {len(keywords)}件")
     else:
-        keywords = api.get_keywords(selected_campaign["campaignId"])
+        keywords = []
 
     if keywords:
         advisor = analyzers["keyword_advisor"]
