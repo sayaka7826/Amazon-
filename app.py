@@ -167,10 +167,14 @@ def initialize_analyzers():
 @st.cache_resource
 def get_sheets_handler():
     try:
-        creds = dict(st.secrets["gcp_service_account"])
-        # Streamlit SecretsのTOML経由で\nがエスケープされるため修正
-        if "private_key" in creds:
-            creds["private_key"] = creds["private_key"].replace("\\n", "\n")
+        import json
+        json_str = st.secrets.get("GCP_SERVICE_ACCOUNT_JSON", "")
+        if json_str:
+            creds = json.loads(json_str)
+        else:
+            creds = dict(st.secrets["gcp_service_account"])
+            if "private_key" in creds:
+                creds["private_key"] = creds["private_key"].replace("\\n", "\n")
         spreadsheet_id = st.secrets["SPREADSHEET_ID"]
         return SheetsHandler(spreadsheet_id, creds)
     except Exception as e:
