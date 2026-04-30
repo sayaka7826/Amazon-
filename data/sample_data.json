@@ -1,0 +1,75 @@
+{
+  "demo_campaigns": [
+    {
+      "campaignId": "1001",
+      "name": "オート広告 - 全体",
+      "type": "AUTO",
+      "state": "ENABLED",
+      "dailyBudget": 50000,
+      "impressions": 5000,
+      "clicks": 250,
+      "cost": 45000,
+      "conversions": 8,
+      "sales": 200000,
+      "roas": 4.44
+    },
+    {
+      "campaignId": "1002",
+      "name": "マニュアル広告 - ブランド指名",
+      "type": "MANUAL",
+      "state": "ENABLED",
+      "dailyBudget": 30000,
+      "impressions": 3000,
+      "clicks": 200,
+      "cost": 35000,
+      "conversions": 6,
+      "sales": 150000,
+      "roas": 4.29
+    },
+    {
+      "campaignId": "1003",
+      "name": "マニュアル広告 - 競合品指名",
+      "type": "MANUAL",
+      "state": "ENABLED",
+      "dailyBudget": 20000,
+      "impressions": 2000,
+      "clicks": 80,
+      "cost": 16000,
+      "conversions": 2,
+      "sales": 60000,
+      "roas": 3.75
+    }
+  ],
+  "demo_keywords": [
+    {
+      "keywordId": "K001",
+      "keyword": "焼酎 プレミアム",
+      "matchType": "auto",
+      "impressions": 2000,
+      "clicks": 120,
+      "cost": 21600,
+      "conversions": 5,
+      "sales": 125000
+    },
+    {
+      "keywordId": "K002",
+      "keyword": "高級 焼酎",
+      "matchType": "auto",
+      "impressions": 1500,
+      "clicks": 80,
+      "cost": 14400,
+      "conversions": 2,
+      "sales": 50000
+    },
+    {
+      "keywordId": "K003",
+      "keyword": "焼酎 ギフト",
+      "matchType": "auto",
+      "impressions": 1000,
+      "clicks": 30,
+      "cost": 5400,
+      "conversions": 1,
+      "sales": 25000
+    }
+  ]
+}
