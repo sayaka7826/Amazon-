@@ -28,12 +28,16 @@ class SheetsHandler:
         self.spreadsheet = client.open_by_key(spreadsheet_id)
         self._ensure_sheets()
 
+    PRODUCTS_SHEET = "products"
+
     def _ensure_sheets(self):
         existing = {ws.title for ws in self.spreadsheet.worksheets()}
         if self.CAMPAIGNS_SHEET not in existing:
             self.spreadsheet.add_worksheet(self.CAMPAIGNS_SHEET, 1000, 20)
         if self.KEYWORDS_SHEET not in existing:
             self.spreadsheet.add_worksheet(self.KEYWORDS_SHEET, 5000, 20)
+        if self.PRODUCTS_SHEET not in existing:
+            self.spreadsheet.add_worksheet(self.PRODUCTS_SHEET, 100, 10)
 
     def _to_numeric(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         for r in records:
@@ -70,3 +74,22 @@ class SheetsHandler:
         ws = self.spreadsheet.worksheet(self.KEYWORDS_SHEET)
         records = ws.get_all_records()
         return self._to_numeric(records)
+
+    def save_products(self, products: List[Dict[str, Any]]) -> None:
+        ws = self.spreadsheet.worksheet(self.PRODUCTS_SHEET)
+        ws.clear()
+        if products:
+            df = pd.DataFrame(products)
+            ws.update([df.columns.tolist()] + df.fillna("").values.tolist())
+
+    def load_products(self) -> List[Dict[str, Any]]:
+        ws = self.spreadsheet.worksheet(self.PRODUCTS_SHEET)
+        records = ws.get_all_records()
+        for r in records:
+            for key in ["price", "cost", "profit_per_unit"]:
+                if key in r and r[key] != "":
+                    try:
+                        r[key] = float(r[key])
+                    except (ValueError, TypeError):
+                        pass
+        return records

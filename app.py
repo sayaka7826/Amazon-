@@ -62,6 +62,72 @@ st.markdown(
 )
 
 # =====================
+# マニュアルターゲティング分析
+# =====================
+def _show_manual_keyword_analysis(keywords, advisor):
+    """マニュアルターゲティング向け入札最適化表示"""
+    roas_target = advisor.config.get("ROAS_TARGET", {})
+    ideal_roas = roas_target.get("ideal", 4.0)
+    min_roas = roas_target.get("min", 2.0)
+
+    bid_up, bid_down, monitor = [], [], []
+    for kw in keywords:
+        cost = kw.get("cost", 0)
+        sales = kw.get("sales", 0)
+        clicks = kw.get("clicks", 0)
+        conversions = kw.get("conversions", 0)
+        roas = sales / cost if cost > 0 else 0
+        cpc = cost / clicks if clicks > 0 else 0
+        cr = conversions / clicks * 100 if clicks > 0 else 0
+        kw_info = {**kw, "roas": roas, "cpc": cpc, "cr": cr}
+        if roas >= ideal_roas and clicks > 10:
+            bid_up.append(kw_info)
+        elif clicks >= 30 and roas < min_roas:
+            bid_down.append(kw_info)
+        else:
+            monitor.append(kw_info)
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("📈 入札強化候補", len(bid_up))
+    col2.metric("📉 入札削減・停止候補", len(bid_down))
+    col3.metric("👁️ 要監視", len(monitor))
+
+    st.subheader("📈 入札強化候補（ROASが高く、さらに伸ばせる）")
+    if bid_up:
+        for kw in sorted(bid_up, key=lambda x: x["roas"], reverse=True):
+            with st.expander(f"✅ {kw['keyword']} — ROAS {kw['roas']:.1f} / CPC {kw['cpc']:.0f}円"):
+                st.write(f"💰 売上: {format_currency(kw.get('sales',0))} ／ 広告費: {format_currency(kw.get('cost',0))}")
+                st.write(f"🖱️ クリック: {kw.get('clicks',0)} ／ 成約率: {kw['cr']:.1f}%")
+                st.write(f"**推奨アクション**: 入札単価を現在の {kw['cpc']:.0f}円 から **{kw['cpc']*1.2:.0f}〜{kw['cpc']*1.5:.0f}円** に引き上げて表示回数を拡大してください")
+    else:
+        st.info("入札強化候補はありません")
+
+    st.subheader("📉 入札削減・停止候補（クリックが多いのにROASが低い）")
+    if bid_down:
+        for kw in sorted(bid_down, key=lambda x: x["cpc"], reverse=True):
+            with st.expander(f"⚠️ {kw['keyword']} — ROAS {kw['roas']:.1f} / CPC {kw['cpc']:.0f}円"):
+                waste = kw.get("cost", 0)
+                st.write(f"💸 広告費: {format_currency(waste)} ／ 売上: {format_currency(kw.get('sales',0))}")
+                st.write(f"🖱️ クリック: {kw.get('clicks',0)} ／ 成約率: {kw['cr']:.1f}%")
+                if kw["roas"] < 0.5:
+                    st.write(f"**推奨アクション**: ROASが極めて低いため、このキーワードを **一時停止** してください")
+                else:
+                    st.write(f"**推奨アクション**: 入札単価を現在の {kw['cpc']:.0f}円 から **{kw['cpc']*0.6:.0f}〜{kw['cpc']*0.8:.0f}円** に引き下げてROASを改善してください")
+    else:
+        st.info("入札削減候補はありません")
+
+    st.subheader("👁️ 要監視（データ蓄積中）")
+    if monitor:
+        mon_df = pd.DataFrame([
+            {"キーワード": k["keyword"], "クリック": k.get("clicks",0),
+             "ROAS": f"{k['roas']:.1f}", "CPC(円)": f"{k['cpc']:.0f}",
+             "マッチタイプ": k.get("matchType", "")}
+            for k in monitor[:20]
+        ])
+        st.dataframe(mon_df, use_container_width=True, hide_index=True)
+
+
+# =====================
 # セッションの初期化
 # =====================
 @st.cache_resource
@@ -104,8 +170,8 @@ def get_sheets_handler():
         creds = dict(st.secrets["gcp_service_account"])
         spreadsheet_id = st.secrets["SPREADSHEET_ID"]
         return SheetsHandler(spreadsheet_id, creds)
-    except Exception:
-        return None
+    except Exception as e:
+        return str(e)  # エラー文字列を返してNoneと区別する
 
 # =====================
 # セッション状態の初期化
@@ -119,20 +185,31 @@ if "uploaded_keywords" not in st.session_state:
 if "sheets_loaded" not in st.session_state:
     st.session_state.sheets_loaded = False
 
+def _get_sheets():
+    """SheetsHandlerを返す。エラーまたは未設定の場合はNone"""
+    result = get_sheets_handler()
+    return result if isinstance(result, SheetsHandler) else None
+
 # 初回のみ Google Sheets からデータを復元
 if not st.session_state.sheets_loaded:
-    _sheets = get_sheets_handler()
-    if _sheets:
+    _sh = _get_sheets()
+    if _sh:
         try:
-            _campaigns = _sheets.load_campaigns()
-            _keywords = _sheets.load_keywords()
+            _campaigns = _sh.load_campaigns()
+            _keywords = _sh.load_keywords()
+            _products = _sh.load_products() if hasattr(_sh, "load_products") else []
             if _campaigns:
                 st.session_state.uploaded_campaigns = _campaigns
             if _keywords:
                 st.session_state.uploaded_keywords = _keywords
-        except Exception:
-            pass
+            if _products:
+                st.session_state.custom_products = {p["sku"]: p for p in _products}
+        except Exception as e:
+            st.session_state._sheets_load_error = str(e)
     st.session_state.sheets_loaded = True
+
+if "custom_products" not in st.session_state:
+    st.session_state.custom_products = {}
 
 
 # =====================
@@ -276,11 +353,63 @@ with st.sidebar.expander("📤 データ管理 - CSVアップロード", expande
         if st.button("🗑️ データをリセット"):
             st.session_state.uploaded_campaigns = None
             st.session_state.uploaded_keywords = None
-            _sheets = get_sheets_handler()
-            if _sheets:
-                _sheets.save_campaigns([])
-                _sheets.save_keywords([])
+            _sh = _get_sheets()
+            if _sh:
+                _sh.save_campaigns([])
+                _sh.save_keywords([])
             st.rerun()
+
+# Google Sheets 接続ステータス
+st.sidebar.markdown("---")
+_sh_result = get_sheets_handler()
+if isinstance(_sh_result, SheetsHandler):
+    st.sidebar.success("☁️ Google Sheets 接続済み")
+elif isinstance(_sh_result, str):
+    st.sidebar.error(f"⚠️ Sheets 接続エラー: {_sh_result[:80]}")
+else:
+    st.sidebar.warning("☁️ Google Sheets 未設定")
+
+if st.session_state.get("_sheets_load_error"):
+    st.sidebar.error(f"読込エラー: {st.session_state._sheets_load_error[:80]}")
+
+# =====================
+# 商品設定
+# =====================
+st.sidebar.markdown("---")
+with st.sidebar.expander("🏪 商品設定", expanded=False):
+    st.caption("入札シミュレーターで使う商品情報を登録してください")
+
+    with st.form("product_form", clear_on_submit=True):
+        p_sku  = st.text_input("SKU（管理番号）", placeholder="例: SKU001")
+        p_name = st.text_input("商品名", placeholder="例: プレミアム焼酎 黒麹")
+        p_price  = st.number_input("販売価格（円）", min_value=0, step=1000)
+        p_cost   = st.number_input("原価（円）", min_value=0, step=1000)
+        if st.form_submit_button("➕ 追加・更新"):
+            if p_sku and p_name and p_price > 0 and p_cost >= 0:
+                new_product = {
+                    "sku": p_sku, "name": p_name,
+                    "price": p_price, "cost": p_cost,
+                    "profit_per_unit": p_price - p_cost,
+                }
+                st.session_state.custom_products[p_sku] = new_product
+                _sh = _get_sheets()
+                if _sh and hasattr(_sh, "save_products"):
+                    _sh.save_products(list(st.session_state.custom_products.values()))
+                st.success(f"✅ {p_name} を登録しました")
+            else:
+                st.error("SKU・商品名・価格を入力してください")
+
+    if st.session_state.custom_products:
+        st.markdown("**登録済み商品**")
+        for sku, p in st.session_state.custom_products.items():
+            col_a, col_b = st.columns([3, 1])
+            col_a.write(f"{p['name']}（利益 {p['profit_per_unit']:,}円）")
+            if col_b.button("削除", key=f"del_{sku}"):
+                del st.session_state.custom_products[sku]
+                _sh = _get_sheets()
+                if _sh and hasattr(_sh, "save_products"):
+                    _sh.save_products(list(st.session_state.custom_products.values()))
+                st.rerun()
 
 # =====================
 # ナビゲーション
@@ -601,6 +730,19 @@ elif page == "2️⃣ キーワード昇格・除外アドバイザー":
 
     if keywords:
         advisor = analyzers["keyword_advisor"]
+
+        # マニュアル / オート判定
+        auto_types = {"auto", "close-match", "loose-match", "substitutes", "complements", ""}
+        is_manual = any(
+            str(k.get("matchType", "")).lower() not in auto_types
+            for k in keywords
+        )
+
+        if is_manual:
+            st.info("📋 このキャンペーンはマニュアルターゲティングです。入札最適化の提案を表示します。")
+            _show_manual_keyword_analysis(keywords, advisor)
+            st.stop()
+
         analysis = advisor.analyze_keyword_portfolio(keywords)
 
         # ポートフォリオ分析サマリー
@@ -740,10 +882,13 @@ elif page == "3️⃣ 入札シミュレーター":
     """
     )
 
-    # 商品選択
+    # 商品選択（カスタム設定 > config.pyのデモ商品）
     st.subheader("📦 商品選択")
-    product_skus = list(PRODUCTS.keys())
-    product_names = [f"{PRODUCTS[sku]['name']} ({sku})" for sku in product_skus]
+    active_products = st.session_state.custom_products if st.session_state.custom_products else PRODUCTS
+    if not st.session_state.custom_products:
+        st.info("👈 サイドバーの「商品設定」から実際の商品を登録してください（現在はデモ商品を表示中）")
+    product_skus = list(active_products.keys())
+    product_names = [f"{active_products[sku]['name']} ({sku})" for sku in product_skus]
     selected_product_idx = st.selectbox(
         "商品を選択", range(len(product_skus)), format_func=lambda i: product_names[i]
     )
@@ -773,8 +918,8 @@ elif page == "3️⃣ 入札シミュレーター":
     with col3:
         st.empty()
 
-    # シミュレーション実行
-    simulator = analyzers["bid_simulator"]
+    # シミュレーション実行（カスタム商品設定を使う）
+    simulator = BidSimulator(active_products)
     result = simulator.get_product_simulator(
         selected_product_sku, monthly_clicks, estimated_cr
     )
