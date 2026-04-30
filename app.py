@@ -226,7 +226,6 @@ with st.sidebar.expander("📤 データ管理 - CSVアップロード", expande
                     if _sheets:
                         _sheets.save_campaigns(campaigns_data)
                     st.success(f"✅ {len(campaigns_data)}個のキャンペーンを保存しました")
-                    st.rerun()
                 else:
                     st.error("❌ データが不正です")
             except Exception as e:
@@ -261,7 +260,6 @@ with st.sidebar.expander("📤 データ管理 - CSVアップロード", expande
                     if _sheets:
                         _sheets.save_keywords(keywords_data)
                     st.success(f"✅ {len(keywords_data)}個のキーワードを保存しました")
-                    st.rerun()
                 else:
                     st.error("❌ データが不正です")
             except Exception as e:
