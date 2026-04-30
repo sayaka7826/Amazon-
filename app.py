@@ -948,104 +948,74 @@ elif page == "3️⃣ 入札シミュレーター":
         with col5:
             st.metric("利益率", f"{(product_info['profit_per_unit'] / product_info['price'] * 100):.1f}%")
 
-        # 重要な指標
-        st.markdown("#### 🎯 入札価格の目安")
-        key_metrics = result["key_metrics"]
+        # ACoSベースの入札目安
+        st.markdown("#### 🎯 入札価格の目安（広告費÷売上 = ACoS 基準）")
+        price = product_info["price"]
+        profit = product_info["profit_per_unit"]
+
+        cpc_7  = simulator.calculate_cpc_from_acos(price, estimated_cr, 7)
+        cpc_12 = simulator.calculate_cpc_from_acos(price, estimated_cr, 12)
+        cpc_20 = simulator.calculate_cpc_from_acos(price, estimated_cr, 20)
 
         col1, col2, col3 = st.columns(3)
-
         with col1:
-            st.metric(
-                "🔴 最大許容CPC（赤字回避）",
-                f"{key_metrics['breakeven_cpc']:.0f}円/クリック",
-            )
-            st.caption("これ以上のCPCは赤字になります")
-
+            st.metric("🟢 最小目標CPC", f"{cpc_7:,.0f}円/クリック")
+            st.caption("ACoS 7%（広告費を売上の7%以内に抑える）")
         with col2:
-            st.metric(
-                "🟡 理想的なCPC",
-                f"{key_metrics['ideal_cpc']:.0f}円/クリック",
-            )
-            st.caption("ROAS 2.0倍を実現")
-
+            st.metric("🟡 標準CPC", f"{cpc_12:,.0f}円/クリック")
+            st.caption("ACoS 12%（広告費を売上の12%に設定）")
         with col3:
-            st.metric(
-                "🟢 最大推奨CPC",
-                f"{key_metrics['max_recommended_cpc']:.0f}円/クリック",
-            )
-            st.caption("ROAS 3.0倍を実現")
+            st.metric("🔴 最大許容CPC", f"{cpc_20:,.0f}円/クリック")
+            st.caption("ACoS 20%（これ以上は広告費が高すぎる）")
 
-        # シナリオシミュレーション
-        st.markdown("#### 📈 CPCシナリオ別シミュレーション")
+        # ACoSシナリオテーブル
+        st.markdown("#### 📈 ACoS目標別シミュレーション")
+        st.caption("「目標CPC」を広告入札単価の上限として設定してください")
 
-        scenarios = result["scenarios"]
-        if not scenarios:
-            st.warning("シナリオを生成できませんでした。成約率を上げるか、商品設定の利益額を確認してください。")
-            st.stop()
-        scenarios_df = pd.DataFrame(scenarios)
-        expected_cols = ["cpc", "total_cost", "conversions", "total_profit_from_sales", "net_profit", "roas", "performance_level"]
-        missing = [c for c in expected_cols if c not in scenarios_df.columns]
-        if missing:
-            st.error(f"データ構造エラー: {missing} が見つかりません。列: {list(scenarios_df.columns)}")
-            st.stop()
-        scenarios_df_display = scenarios_df[expected_cols].copy()
-        scenarios_df_display.columns = [
-            "CPC(円)",
-            "月間広告費(円)",
-            "推定成約数",
-            "売上利益(円)",
-            "純利益(円)",
-            "ROAS",
-            "評価",
+        acos_scenarios = simulator.simulate_acos_scenarios(
+            price, monthly_clicks, profit, estimated_cr
+        )
+        acos_df = pd.DataFrame(acos_scenarios)
+        acos_display = acos_df[[
+            "acos_target", "target_cpc", "ad_spend",
+            "conversions", "total_sales", "net_profit", "roas", "performance"
+        ]].copy()
+        acos_display.columns = [
+            "ACoS目標(%)", "目標CPC(円)", "月間広告費(円)",
+            "推定成約数", "推定売上(円)", "推定純利益(円)", "ROAS", "評価"
         ]
 
-        # パフォーマンスレベルで色付け
-        def color_performance(val):
-            if val == "赤字":
-                return "background-color: #FFE5E5"
-            elif val == "要改善":
-                return "background-color: #FFF3CD"
-            elif val == "改善中":
-                return "background-color: #D1ECF1"
-            elif val == "良好":
-                return "background-color: #D4EDDA"
-            else:
-                return "background-color: #C8E6C9"
+        def color_perf(val):
+            colors = {"優秀": "#C8E6C9", "良好": "#D4EDDA", "要改善": "#FFF3CD", "赤字": "#FFE5E5"}
+            return f"background-color: {colors.get(val, '')}"
 
-        styled_df = scenarios_df_display.style.map(
-            color_performance, subset=["評価"]
+        st.dataframe(
+            acos_display.style.map(color_perf, subset=["評価"]),
+            use_container_width=True,
+            hide_index=True,
         )
-        st.dataframe(styled_df, use_container_width=True)
 
-        # グラフ表示
+        # グラフ
         col1, col2 = st.columns(2)
-
         with col1:
-            fig_profit = px.line(
-                scenarios_df,
-                x="cpc",
-                y="net_profit",
-                title="CPC別 月間純利益",
-                labels={"cpc": "CPC (円)", "net_profit": "純利益 (円)"},
+            fig_cpc = px.bar(
+                acos_df, x="acos_target", y="target_cpc",
+                title="ACoS目標別 推奨入札単価(CPC)",
+                labels={"acos_target": "ACoS目標(%)", "target_cpc": "目標CPC(円)"},
+            )
+            fig_cpc.add_hrect(y0=cpc_7, y1=cpc_20, fillcolor="green", opacity=0.1,
+                              annotation_text="推奨範囲(7〜20%)")
+            st.plotly_chart(fig_cpc, use_container_width=True)
+        with col2:
+            fig_profit = px.bar(
+                acos_df, x="acos_target", y="net_profit",
+                title="ACoS目標別 推定純利益",
+                labels={"acos_target": "ACoS目標(%)", "net_profit": "純利益(円)"},
+                color="performance",
+                color_discrete_map={"優秀": "#28A745", "良好": "#5CB85C", "要改善": "#FFC107", "赤字": "#DC3545"},
             )
             fig_profit.add_hline(y=0, line_dash="dash", line_color="red")
             st.plotly_chart(fig_profit, use_container_width=True)
-
-        with col2:
-            fig_roas = px.line(
-                scenarios_df,
-                x="cpc",
-                y="roas",
-                title="CPC別 ROAS",
-                labels={"cpc": "CPC (円)", "roas": "ROAS"},
-            )
-            fig_roas.add_hline(y=2.0, line_dash="dash", line_color="orange", annotation_text="目標ROAS 2.0x")
-            st.plotly_chart(fig_roas, use_container_width=True)
-
-        # 推奨事項
-        st.markdown("#### 💡 推奨事項")
-        for rec in result["recommendations"]:
-            st.write(rec)
 
         # 理想シナリオ詳細
         with st.expander("📊 理想シナリオ詳細（ROAS 2.0倍）"):

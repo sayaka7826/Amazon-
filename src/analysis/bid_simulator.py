@@ -117,6 +117,61 @@ class BidSimulator:
             "roas": round(roas, 2),
         }
 
+    def calculate_cpc_from_acos(
+        self,
+        price: float,
+        conversion_rate: float,
+        target_acos_pct: float,
+    ) -> float:
+        """ACoS目標からCPCを逆算: CPC = 販売価格 × 成約率 × ACoS%"""
+        cr = conversion_rate / 100
+        return round(price * cr * (target_acos_pct / 100), 0)
+
+    def simulate_acos_scenarios(
+        self,
+        price: float,
+        monthly_clicks: int,
+        profit_per_unit: float,
+        conversion_rate: float,
+        acos_targets: Optional[List[float]] = None,
+    ) -> List[Dict[str, Any]]:
+        """ACoS目標別にCPC・広告費・利益をシミュレーション"""
+        if acos_targets is None:
+            acos_targets = [5, 7, 10, 12, 15, 18, 20, 25, 30]
+        cr = conversion_rate / 100
+        conversions = int(monthly_clicks * cr)
+        total_sales = price * conversions
+        gross_profit = conversions * profit_per_unit
+
+        scenarios = []
+        for acos_pct in acos_targets:
+            target_cpc = self.calculate_cpc_from_acos(price, conversion_rate, acos_pct)
+            ad_spend = target_cpc * monthly_clicks
+            net_profit = gross_profit - ad_spend
+            roas = total_sales / ad_spend if ad_spend > 0 else 0
+
+            if net_profit >= gross_profit * 0.5:
+                performance = "優秀"
+            elif net_profit > 0:
+                performance = "良好"
+            elif net_profit > -gross_profit * 0.2:
+                performance = "要改善"
+            else:
+                performance = "赤字"
+
+            scenarios.append({
+                "acos_target": acos_pct,
+                "target_cpc": target_cpc,
+                "ad_spend": round(ad_spend, 0),
+                "conversions": conversions,
+                "total_sales": round(total_sales, 0),
+                "gross_profit": round(gross_profit, 0),
+                "net_profit": round(net_profit, 0),
+                "roas": round(roas, 2),
+                "performance": performance,
+            })
+        return scenarios
+
     def simulate_cpc_scenarios(
         self,
         monthly_clicks: int,
