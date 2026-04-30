@@ -333,3 +333,4 @@ streamlit run app.py --logger.level=debug
 **Version**: 1.0  
 **最終更新**: 2026年4月30日  
 **開発者**: Claude Code Assistant
+# Amazon-
